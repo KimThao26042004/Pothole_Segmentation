@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="utf-8" />
+    <title>Pothole GPS Map</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link
+        rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+
+    <style>
+        html, body, #map {
+            height: 100%;
+            width: 100%;
+            margin: 0;
+            padding: 0;
+            background: #eef2f7;
+            overflow: hidden;
+        }
+
+        body {
+            position: relative;
+        }
+
+        #map {
+            position: absolute;
+            inset: 0;
+        }
+
+        .leaflet-container {
+            height: 100%;
+            width: 100%;
+            background: #eef2f7;
+        }
+
+        .vehicle-icon {
+            font-size: 28px;
+            text-align: center;
+            filter: drop-shadow(0 2px 4px rgba(0,0,0,.35));
+        }
+
+        .pothole-icon {
+            width: 22px;
+            height: 22px;
+            background: #ef4444;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 3px 8px rgba(0,0,0,.35);
+        }
+
+        .manual-icon {
+            width: 22px;
+            height: 22px;
+            background: #2563eb;
+            border: 3px solid #ffffff;
+            border-radius: 50%;
+            box-shadow: 0 3px 8px rgba(0,0,0,.35);
+        }
+
+        .leaflet-popup-content {
+            font-family: Arial, Helvetica, sans-serif;
+            font-size: 13px;
+            line-height: 1.45;
+        }
+
+        .popup-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #dc2626;
+            margin-bottom: 4px;
+        }
+
+        .popup-manual-title {
+            font-size: 15px;
+            font-weight: 800;
+            color: #2563eb;
+            margin-bottom: 4px;
+        }
+
+        .popup-image-button {
+            margin-top: 8px;
+            padding: 6px 10px;
+            border: none;
+            border-radius: 8px;
+            background: #2563eb;
+            color: white;
+            font-weight: 700;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .popup-image-button:hover {
+            background: #1d4ed8;
+        }
+    </style>
+</head>
+
+<body>
+<div id="map"></div>
+
+<script>
+    let backend = null;
+
+    let map = L.map('map').setView([10.762622, 106.660172], 15);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 20,
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    let selectedMarker = null;
+    let reportLayer = L.layerGroup().addTo(map);
+    let demoLayer = L.layerGroup().addTo(map);
+    let potholeLayer = L.layerGroup().addTo(map);
+
+    let routeLine = null;
+    let vehicleMarker = null;
+
+    const vehicleIcon = L.divIcon({
+        html: '<div class="vehicle-icon">🚗</div>',
+        className: '',
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+    });
+
+    const potholeIcon = L.divIcon({
+        html: '<div class="pothole-icon"></div>',
+        className: '',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+    });
+
+    const manualIcon = L.divIcon({
+        html: '<div class="manual-icon"></div>',
+        className: '',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+    });
+
+    function replaceAllCompat(text, search, replacement) {
+        return String(text).split(search).join(replacement);
+    }
+
+    function escapeHtml(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+
+        let text = String(value);
+        text = replaceAllCompat(text, '&', '&amp;');
+        text = replaceAllCompat(text, '<', '&lt;');
+        text = replaceAllCompat(text, '>', '&gt;');
+        text = replaceAllCompat(text, '"', '&quot;');
+        text = replaceAllCompat(text, "'", '&#039;');
+        text = replaceAllCompat(text, '\n', '<br>');
+        return text;
+    }
+
+    function escapeJsString(value) {
+        if (value === null || value === undefined) {
+            return '';
+        }
+
+        return String(value)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/\n/g, '\\n')
+            .replace(/\r/g, '');
+    }
+
+    function normalizeImagePath(imagePath) {
+        if (!imagePath) {
+            return '';
+        }
+        return String(imagePath).replace(/\\/g, '/');
+    }
+
+    function fixMapSize() {
+        if (map) {
+            setTimeout(function () {
+                map.invalidateSize(true);
+            }, 0);
+
+            setTimeout(function () {
+                map.invalidateSize(true);
+            }, 250);
+
+            setTimeout(function () {
+                map.invalidateSize(true);
+            }, 800);
+        }
+    }
+
+    window.addEventListener('load', fixMapSize);
+    window.addEventListener('resize', fixMapSize);
+    document.addEventListener('DOMContentLoaded', fixMapSize);
+
+    new QWebChannel(qt.webChannelTransport, function(channel) {
+        backend = channel.objects.backend;
+        fixMapSize();
+    });
+
+    map.whenReady(function () {
+        fixMapSize();
+    });
+
+    map.on('click', function(e) {
+        if (backend) {
+            backend.receive_location(e.latlng.lat, e.latlng.lng);
+        }
+
+        moveToLocation(
+            e.latlng.lat,
+            e.latlng.lng,
+            'Vị trí đã chọn'
+        );
+    });
+
+    function showReportImage(imagePath) {
+        const normalizedPath = normalizeImagePath(imagePath);
+
+        if (normalizedPath && backend && backend.show_report_image) {
+            backend.show_report_image(normalizedPath);
+        }
+    }
+
+    function buildImageButton(imagePath, label) {
+        const normalizedPath = normalizeImagePath(imagePath);
+
+        if (!normalizedPath) {
+            return '';
+        }
+
+        const safePathForOnClick = escapeJsString(normalizedPath);
+        return `
+            <br>
+            <button class="popup-image-button" onclick="showReportImage('${safePathForOnClick}')">
+                ${escapeHtml(label || 'Xem ảnh')}
+            </button>
+        `;
+    }
+
+    function moveToLocation(lat, lng, address) {
+        if (selectedMarker) {
+            map.removeLayer(selectedMarker);
+        }
+
+        const popup = `
+            <b>Vị trí đã chọn</b><br>
+            ${escapeHtml(address)}<br>
+            <b>Tọa độ:</b> ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}
+        `;
+
+        selectedMarker = L.marker([lat, lng], {
+            icon: manualIcon
+        })
+            .addTo(map)
+            .bindPopup(popup)
+            .openPopup();
+
+        map.setView([lat, lng], 17);
+        fixMapSize();
+    }
+
+    function addReportMarker(lat, lng, address, createdAt, imageCount, imagePath, analysisHtml) {
+        const normalizedPath = normalizeImagePath(imagePath);
+
+        const popup = `
+            <div class="popup-manual-title">Báo cáo thủ công</div>
+            ${escapeHtml(address)}<br>
+            <b>Thời gian gửi:</b> ${escapeHtml(createdAt)}<br>
+            <b>Số file:</b> ${imageCount || 0}<br>
+            <b>Tọa độ:</b> ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}
+            ${buildImageButton(normalizedPath, 'Xem ảnh')}
+        `;
+
+        const marker = L.marker([lat, lng], {
+            icon: manualIcon
+        })
+            .addTo(reportLayer)
+            .bindPopup(popup);
+
+        marker.on('click', function () {
+            if (backend && backend.show_pothole_analysis) {
+                backend.show_pothole_analysis(analysisHtml || '');
+            }
+
+            if (normalizedPath) {
+                showReportImage(normalizedPath);
+            }
+
+            fixMapSize();
+        });
+
+        fixMapSize();
+    }
+
+    function clearDemoLayer() {
+        demoLayer.clearLayers();
+        potholeLayer.clearLayers();
+
+        if (routeLine) {
+            map.removeLayer(routeLine);
+            routeLine = null;
+        }
+
+        vehicleMarker = null;
+        fixMapSize();
+    }
+
+    function setRoute(pointsJson) {
+        const points = JSON.parse(pointsJson);
+
+        clearDemoLayer();
+
+        if (!points || points.length === 0) {
+            return;
+        }
+
+        routeLine = L.polyline(points, {
+            color: '#2563eb',
+            weight: 5,
+            opacity: 0.8
+        }).addTo(demoLayer);
+
+        routeLine.on('click', function(e) {
+            L.popup()
+                .setLatLng(e.latlng)
+                .setContent(
+                    '<b>Tuyến GPS demo</b><br>' +
+                    '<b>Tọa độ:</b> ' +
+                    e.latlng.lat.toFixed(6) + ', ' +
+                    e.latlng.lng.toFixed(6)
+                )
+                .openOn(map);
+
+            fixMapSize();
+        });
+
+        vehicleMarker = L.marker(points[0], {
+            icon: vehicleIcon
+        })
+            .addTo(demoLayer)
+            .bindPopup('Xe đang di chuyển');
+
+        map.fitBounds(routeLine.getBounds(), {
+            padding: [35, 35]
+        });
+
+        fixMapSize();
+    }
+
+    function updateVehicle(lat, lng, timeText, roadName) {
+        const latlng = [lat, lng];
+
+        if (!vehicleMarker) {
+            vehicleMarker = L.marker(latlng, {
+                icon: vehicleIcon
+            }).addTo(demoLayer);
+        } else {
+            vehicleMarker.setLatLng(latlng);
+        }
+
+        const popup = `
+            <b>Xe đang di chuyển</b><br>
+            <b>Tuyến đường:</b> ${escapeHtml(roadName || 'Chưa xác định')}<br>
+            <b>Thời điểm video:</b> ${escapeHtml(timeText)}<br>
+            <b>Tọa độ:</b> ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}
+        `;
+
+        vehicleMarker.bindPopup(popup);
+
+        map.panTo(latlng, {
+            animate: false
+        });
+
+        fixMapSize();
+    }
+
+    function addPotholeMarker(lat, lng, timeText, confidence, imageCount, roadName, videoName, severity, imagePath, analysisHtml) {
+        const normalizedPath = normalizeImagePath(imagePath);
+
+        const popup = `
+            <div class="popup-title">Ổ gà được phát hiện</div>
+            <b>Tuyến đường:</b> ${escapeHtml(roadName || 'Chưa xác định')}<br>
+            <b>Nguồn:</b> Video ${escapeHtml(videoName || '')}<br>
+            <b>Thời điểm video:</b> ${escapeHtml(timeText)}<br>
+            <b>Confidence:</b> ${Number(confidence || 0).toFixed(2)}<br>
+            <b>Mức độ:</b> ${escapeHtml(severity || 'Chưa đánh giá')}<br>
+            <b>Tọa độ:</b> ${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}<br>
+            <b>Frame lưu:</b> ${imageCount || 1}
+            ${buildImageButton(normalizedPath, 'Xem ảnh frame')}
+        `;
+
+        const marker = L.marker([lat, lng], {
+            icon: potholeIcon
+        })
+            .addTo(potholeLayer)
+            .bindPopup(popup);
+
+        marker.on('click', function () {
+            if (backend && backend.show_pothole_analysis) {
+                backend.show_pothole_analysis(analysisHtml || '');
+            }
+
+            if (normalizedPath) {
+                showReportImage(normalizedPath);
+            }
+
+            fixMapSize();
+        });
+
+        fixMapSize();
+    }
+</script>
+</body>
+</html>

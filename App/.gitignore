@@ -1,0 +1,39 @@
+cat > .gitignore << 'EOF'
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+venv/
+env/
+App/.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large AI/model files
+*.pt
+*.pth
+*.onnx
+*.engine
+*.weights
+
+# Data/output
+runs/
+outputs/
+output/
+results/
+logs/
+*.mp4
+*.avi
+*.mov
+*.mkv
+EOF

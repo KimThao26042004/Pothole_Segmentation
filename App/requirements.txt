@@ -1,0 +1,9 @@
+ultralytics
+opencv-python
+PyQt5
+numpy
+pandas
+matplotlib
+seaborn
+Pillow
+PyYAML
